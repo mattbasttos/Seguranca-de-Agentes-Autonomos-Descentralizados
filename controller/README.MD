@@ -1,232 +1,147 @@
-# Guia Rápido: Comandos Essenciais do Ollama
+# 📘 Chatbot de Operadora com IA e Identidade Descentralizada (CLI)
 
+Este projeto simula uma operadora de telecomunicações onde um **Agente de IA (Ollama/Phi-3)** interpreta comandos de linguagem natural para controlar uma infraestrutura de **Identidade Autossoberana (Hyperledger Aries)**.
 
+O sistema permite configurar a operadora, registrar novos clientes e vender planos de dados, tudo via API e registrado imutavelmente em Blockchain.
 
-Este guia cobre os comandos básicos para gerenciar o Ollama em um ambiente Linux, com foco em como o usamos para o projeto do chatbot ACA-Py.
+-----
 
+## 🛠️ Pré-requisitos
 
+  * **Sistema Operacional:** Linux (Ubuntu/WSL2).
+  * **Docker:** Para rodar a rede Blockchain (VON Network).
+  * **Python 3.12+:** Para os scripts de controle.
+  * **Ollama:** Para rodar o modelo de IA localmente.
+  * **GPU (Recomendado):** Para resposta rápida da IA.
 
-## 1\. Gerenciando o Serviço (Comandos `systemctl`)
+-----
 
+## 🚀 Guia de Instalação e Execução
 
+Siga a ordem exata abaixo para garantir o funcionamento.
 
-Na maioria das instalações do Linux, o Ollama roda como um **serviço de segundo plano** (`systemd`). Você não o inicia manualmente com `ollama serve`; você gerencia o serviço.
+### 1\. Preparar a Inteligência Artificial (Ollama)
 
-
-
-### verificar o status
-
-
-
-Este é o comando mais importante. Ele mostra se o Ollama está rodando, se falhou, ou se está parado.
-
-
+Certifique-se de que o serviço Ollama está rodando e baixe o modelo leve (Phi-3 Mini) para garantir estabilidade e velocidade.
 
 ```bash
-
+# Verificar status do serviço
 sudo systemctl status ollama
 
-```
-
-
-
-  * **Se você vir `active (running)`:** O servidor está no ar e pronto.
-
-  * **Se você vir `inactive (dead)`:** O servidor está parado.
-
-
-
-### Iniciar o serviço
-
-
-
-Use este comando se o status mostrar `inactive (dead)` e você quiser ligá-lo.
-
-
-
-```bash
-
-sudo systemctl start ollama
-
-```
-
-
-
-### Parar o serviço
-
-
-
-Use este comando para forçar a parada do servidor.
-
-
-
-```bash
-
-sudo systemctl stop ollama
-
-```
-
-
-
-### Reiniciar o serviço (O Mais Útil para Erros 500)
-
-
-
-Se você receber um `Erro 500` do Ollama, significa que o servidor travou. Reiniciá-lo é a melhor solução.
-
-
-
-```bash
-
+# Se der erro 500 ou travar, reinicie:
 sudo systemctl restart ollama
 
+# Baixar o modelo (apenas na primeira vez)
+ollama pull phi3:mini
 ```
 
+### 2\. Limpeza do Ambiente (Crucial)
 
-
------
-
-
-
-## 2\. Baixando Novos Modelos (LLMs)
-
-
-
-O comando `pull` baixa um novo modelo (como o `llama3` ou `phi3:mini`) do registro do Ollama para o seu computador. Neste projeto foi utilizado o Phi3:mini.
-
-
+Para evitar erros de *"Schema already exists"* no Blockchain, limpe as carteiras antigas antes de cada demonstração.
 
 ```bash
-
-ollama pull <nome-do-modelo>
-
+# Pare todos os terminais (Ctrl+C) e execute:
+rm -rf ~/.indy_client/wallet/issuer_wallet_prod
+rm -rf ~/.indy_client/wallet/holder_wallet_clean
 ```
 
+### 3\. Iniciar a Infraestrutura (Terminais 1, 2 e 3)
 
+Abra terminais separados para cada componente:
 
-**Exemplos que usamos:**
-
-
-
-  * Para baixar o Llama 3 (grande, poderoso):
+  * **Terminal 1 (Blockchain Ledger):**
 
     ```bash
-
-    ollama pull llama3
-
+    cd von-network
+    ./manage start
     ```
 
-  * Para baixar o Phi-3 Mini (pequeno, rápido, ótimo para testes):
+  * **Terminal 2 (Operadora TelecomX - Issuer):**
 
     ```bash
-
-    ollama pull phi3:mini
-
+    source venv/bin/activate
+    python issuer/run_issuer.py
     ```
 
+  * **Terminal 3 (Cliente - Holder):**
 
+    ```bash
+    source venv/bin/activate
+    python holder/run_holder.py
+    ```
 
------
+### 4\. Iniciar o Cérebro do Chatbot (Terminal 4)
 
-
-
-## 3\. O Comando `ollama serve` (O que NÃO fazer)
-
-
-
-Este comando tenta iniciar *manualmente* um novo servidor Ollama no seu terminal.
-
-
+Este servidor conecta a IA aos agentes ACA-Py.
 
 ```bash
-
-ollama serve
-
-```
-
-
-
-Quase sempre, você **não deve** usar este comando, porque o serviço (`systemctl`) **já está rodando em segundo plano**.
-
-
-
-Se você tentar usá-lo, verá este erro, que é na verdade uma **boa notícia**:
-
-
-
-```bash
-
-Error: listen tcp 127.0.0.1:11434: bind: address already in use
-
-```
-
-
-
-Isso simplesmente confirma que o servidor principal já está no ar e ocupando a porta `11434`. Apenas feche este terminal e continue.
-
-
-
------
-
-
-
-# 4\. Roteiro de Execução (Passo a Passo)
-
-Para que o sistema funcione, os componentes devem ser iniciados nesta ordem exata. Use terminais separados para cada um.
-
-### Passo A: Infraestrutura SSI
-
-1.  **Terminal 1 (Ledger):** Inicie a VON Network.
-2.  **Terminal 2 (Issuer):** `python issuer/run_issuer.py`
-3.  **Terminal 3 (Holder):** `python holder/run_holder.py`
-4.  *(Opcional)* **Terminal 4 (Verifier):** `python verifier/run_verifier.py`
-
-### Passo B: Servidor do Chatbot
-
-Vá para a pasta do controlador e inicie a API.
-
-**Terminal 5:**
-
-```bash
-cd ~/testesACAPy/controller
+cd controller
 source ../venv/bin/activate
 python chatbot_server.py
 ```
 
-  * **Sucesso:** Você verá `Uvicorn running on http://0.0.0.0:8080`.
+*Aguarde a mensagem: `Uvicorn running on http://0.0.0.0:8080`*
 
 -----
 
-## 5\. Comandos de Teste (Demo Script)
+## 💻 Roteiro de Demonstração (Comandos CURL)
 
-Use um **Terminal 6** para enviar os comandos de voz (simulados via texto) para o seu bot.
+Use um **Terminal 5** para enviar os comandos como se fosse o usuário conversando com o bot. Copie e cole os comandos abaixo.
 
-### 1️⃣ Configurar o Ambiente
+### Passo 1: Configuração da Operadora (Setup)
 
-O bot deve criar Schemas e CredDefs no Issuer.
-
-```bash
-curl -X POST http://localhost:8080/chat \
-     -H "Content-Type: application/json" \
-     -d '{"message": "Prepare o marketplace para mim"}'
-```
-
-### 2️⃣ Conectar Agentes
-
-O bot deve criar um convite OOB no Issuer e fazê-lo ser aceito pelo Holder.
+O comando faz a IA criar os Schemas (Identidade e Planos) e as definições de credencial no Blockchain.
 
 ```bash
 curl -X POST http://localhost:8080/chat \
      -H "Content-Type: application/json" \
-     -d '{"message": "Conecte o administrador com o vendedor"}'
+     -d '{"message": "Inicie os sistemas da TelecomX"}'
 ```
 
-### 3️⃣ Emitir Credencial (O Grande Teste)
+  * **Resposta Esperada:** `"Infraestrutura TelecomX configurada com sucesso. DID: Th7M..."`
 
-O bot deve entender os parâmetros "Nome" e "Nível" da frase e emitir a credencial.
+### Passo 2: Onboarding do Cliente (Connection)
+
+Estabelece um canal de comunicação criptografado e seguro entre a Operadora e o Cliente.
 
 ```bash
 curl -X POST http://localhost:8080/chat \
      -H "Content-Type: application/json" \
-     -d '{"message": "Emita um selo nível Ouro para a loja TechStore"}'
+     -d '{"message": "Faça a conexão com o novo cliente"}'
 ```
+
+  * **Resposta Esperada:** `"Cliente conectado e autenticado na base da TelecomX."`
+
+### Passo 3: Venda de Plano (Issuance)
+
+A IA entende o nome do plano e a quantidade de gigas a partir da frase e emite a credencial para a carteira do cliente.
+
+```bash
+curl -X POST http://localhost:8080/chat \
+     -H "Content-Type: application/json" \
+     -d '{"message": "Ative o plano TelecomX Ultra com 500GB para este cliente"}'
+```
+
+  * **Resposta Esperada:** `"Plano 'TelecomX Ultra' (500GB) ativado na carteira do cliente."`
+
+-----
+
+## ✅ Como Validar que Funcionou?
+
+Para provar que o `curl` realmente gerou uma credencial verificável:
+
+1.  Abra o navegador em: `http://localhost:8011/api/doc` (Swagger do **Cliente**).
+2.  Procure a seção **credentials** e o endpoint `GET /credentials`.
+3.  Clique em **Try it out** -\> **Execute**.
+4.  Você verá no JSON de resposta o plano "TelecomX Ultra" e a franquia "500GB" assinados digitalmente pela Operadora.
+
+-----
+
+## ⚠️ Solução de Problemas
+
+| Erro | Solução |
+| :--- | :--- |
+| **Erro 500 no Curl** | O Ollama travou. Rode `sudo systemctl restart ollama`. |
+| **"Schema already exists"** | Você esqueceu a limpeza. Pare tudo, rode o passo 2 (Limpeza) e reinicie. |
+| **"Erro: Necessário setup..."** | Você reiniciou o servidor do chatbot e ele perdeu a memória. Refaça o Passo 1 e Passo 2. |
+| **Connection Refused** | Verifique se o `chatbot_server.py` está rodando na porta 8080. |
