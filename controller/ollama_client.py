@@ -1,78 +1,74 @@
 import requests
 import json
 import logging
-from typing import Dict, Any  
+from typing import Dict, Any
 
-OLLAMA_URL = "http://localhost:11434/api/generate"
-# Mude de "llama3" para:
+OLLAMA_URL = "http://localhost:11434/api/chat"
 MODEL_NAME = "phi3:mini"
 
-# O "MENU" DE FERRAMENTAS QUE O LLM PODE ESCOLHER
+# --- PROMPT REFORÇADO ---
 SYSTEM_PROMPT = """
-Você é um assistente de chatbot para um marketplace de identidade descentralizada.
-Sua tarefa é traduzir a linguagem natural do usuário em uma chamada de função JSON.
-Responda APENAS com o objeto JSON e nada mais. Não adicione explicações.
+Você é o orquestrador JSON da TelecomX.
+Sua tarefa é classificar a intenção do usuário em uma das funções abaixo.
 
-O JSON deve ter o formato:
-{"function_name": "nome_da_funcao", "parameters": {"arg1": "valor1", ...}}
+REGRAS CRÍTICAS:
+1. Responda APENAS com JSON válido.
+2. USE APENAS OS NOMES DE FUNÇÃO EXATOS LISTADOS ABAIXO. NÃO TRADUZA. NÃO INVENTE.
+3. Se a intenção for ativar um plano, use SEMPRE "ativar_plano".
 
-As funções disponíveis são:
+LISTA DE FUNÇÕES PERMITIDAS:
 
-1. setup_marketplace
-   - Descrição: Configura a plataforma (cria todos os Schemas e CredDefs).
-   - Parâmetros: {}
-   - Exemplo de Uso: "Configure a plataforma", "Prepare o marketplace"
+1. setup_telco
+   - Gatilhos: "Iniciar sistema", "Configurar".
+   - Params: {}
 
-2. conectar_admin_vendedor
-   - Descrição: Cria uma conexão entre o Admin (Issuer) e o Vendedor (Holder).
-   - Parâmetros: {}
-   - Exemplo de Uso: "Registre um novo vendedor", "Conecte o admin ao vendedor"
+2. conectar_cliente
+   - Gatilhos: "Conectar cliente", "Novo assinante", "Onboarding".
+   - Params: {}
 
-3. emitir_selo_vendedor
-   - Descrição: Emite um "Selo de Vendedor Verificado" para o vendedor.
-   - Parâmetros:
-     - "nome_vendedor": (string) O nome ou ID do vendedor.
-     - "nivel": (string) O nível de verificação (ex: Ouro, Prata, Bronze).
-   - Exemplo de Uso: "Emita um selo Ouro para o Vendedor_123", "Verificar Vendedor_ABC como Prata"
+3. ativar_plano
+   - Gatilhos: "Ativar plano", "Vender promoção", "Quero 50GB".
+   - Params:
+     - "nome_plano": (string) Ex: "Promoção Turbo".
+     - "franquia": (string) Ex: "50GB".
 
-(Você pode adicionar mais funções aqui, como 'emitir_anuncio' ou 'solicitar_prova')
+4. verificar_acesso
+   - Gatilhos: "Verificar acesso", "Validar plano".
+   - Params: {}
 
-Traduza o prompt do usuário para UMA ÚNICA chamada de função JSON.
+Exemplo de Saída Correta:
+{
+  "function_name": "ativar_plano",
+  "parameters": {
+    "nome_plano": "Turbo 5G",
+    "franquia": "500GB"
+  }
+}
 """
 
 def get_ollama_function_call(user_prompt: str) -> Dict[str, Any]:
-    """
-    Envia o prompt do usuário para o Ollama e retorna a chamada de função JSON.
-    """
-    logging.info(f"Ollama recebendo: {user_prompt}")
-    
-    # Formata o prompt completo (System Prompt + User Prompt)
-    full_prompt = f"{SYSTEM_PROMPT}\nPROMPT DO USUÁRIO: \"{user_prompt}\""
+    logging.info(f"Enviando para Phi-3: {user_prompt}")
     
     payload = {
         "model": MODEL_NAME,
-        "prompt": full_prompt,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt}
+        ],
         "stream": False,
-        "format": "json"  # Pede ao Ollama para garantir que a saída seja JSON
+        "format": "json",
+        "options": {
+            "temperature": 0.0, # Criatividade zero
+            "num_predict": 128  # Limita o tamanho da resposta para evitar alucinações longas
+        }
     }
     
     try:
         response = requests.post(OLLAMA_URL, json=payload)
         response.raise_for_status()
-        
-        # A resposta do Ollama está em 'response' (que é uma string JSON)
-        response_json_str = response.json()["response"]
-        
-        # Analisa a string JSON interna para obter o objeto
-        function_call_json = json.loads(response_json_str)
-        
-        logging.info(f"Ollama retornou: {function_call_json}")
-        return function_call_json
-        
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Erro ao chamar Ollama: {e}")
+        content = response.json()["message"]["content"]
+        logging.info(f"Resposta IA: {content}")
+        return json.loads(content)
+    except Exception as e:
+        logging.error(f"Erro IA: {e}")
         return {"function_name": "error", "parameters": {"message": str(e)}}
-    except json.JSONDecodeError as e:
-        logging.error(f"Erro ao analisar JSON do Ollama: {e}")
-        logging.error(f"String recebida: {response_json_str}")
-        return {"function_name": "error", "parameters": {"message": "Ollama retornou JSON inválido"}}

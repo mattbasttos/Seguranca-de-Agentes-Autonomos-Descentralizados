@@ -1,139 +1,199 @@
 import aiohttp
 import logging
+import asyncio
 from typing import Dict, Any
 
-#  URLs dos Agentes (Constantes) 
-ISSUER_ADMIN = "http://localhost:8001"
-HOLDER_ADMIN = "http://localhost:8011"
-VERIFIER_ADMIN = "http://localhost:8021"
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Estado do Sistema (Simples) 
-# Em um sistema real, isso seria um banco de dados.
-# Vamos armazenar os IDs que geramos aqui.
+# --- Constantes ---
+OPERADORA_ADMIN = "http://localhost:8001"
+CLIENTE_ADMIN = "http://localhost:8011"
+VERIFICADOR_ADMIN = "http://localhost:8021"
+
+# --- Estado em Memória ---
 STATE = {
-    "issuer_did": None,
-    "selo_schema_id": None,
-    "selo_cred_def_id": None,
-    "produto_schema_id": None,
-    "produto_cred_def_id": None,
-    "conn_id_issuer_holder": None,
-    "conn_id_verifier_holder": None,
+    "operadora_did": None,
+    "kyc_schema_id": None,
+    "kyc_cred_def_id": None,
+    "plano_schema_id": None,
+    "plano_cred_def_id": None,
+    "conn_id_operadora": None,
+    "conn_id_verificador": None
 }
 
-#  Funções Auxiliares de API 
+# --- Auxiliar HTTP ---
 async def admin_request(session, method, url, json_data=None, params=None):
-    """Função auxiliar para fazer chamadas de API genéricas."""
     try:
         async with session.request(method, url, json=json_data, params=params) as resp:
-            resp.raise_for_status()
+            if resp.status >= 400:
+                text = await resp.text()
+                logging.error(f"Erro API {resp.status} em {url}: {text}")
+                return None
             return await resp.json()
-    except aiohttp.ClientError as e:
-        logging.error(f"Erro na API {method} {url}: {e}")
+    except Exception as e:
+        logging.error(f"Exceção Request {url}: {e}")
         return None
 
-# --- Ferramentas do Chatbot ---
+# --- Funcionalidades de Telecom ---
 
-async def setup_marketplace(session: aiohttp.ClientSession) -> str:
-    """Ferramenta 1: Configura o Issuer com os schemas e cred defs do marketplace."""
-    logging.info("Iniciando setup do marketplace...")
-    
+async def setup_telco(session: aiohttp.ClientSession) -> str:
+    """Configura Schemas e CredDefs da TelecomX no Blockchain."""
+    logging.info("Iniciando setup da TelecomX...")
+
     # 1. Obter DID
-    did_info = await admin_request(session, "GET", f"{ISSUER_ADMIN}/wallet/did/public")
-    if not did_info or not did_info.get("result", {}).get("did"):
-        return "Erro: Não foi possível obter o DID público do Issuer."
-    issuer_did = did_info["result"]["did"]
-    STATE["issuer_did"] = issuer_did
-    logging.info(f"Issuer DID: {issuer_did}")
-
-    # 2. Criar Schema do Selo
-    schema_selo_body = {
-        "schema": {"issuerId": issuer_did, "name": "selo-vendedor", "version": "1.0", "attrNames": ["nome_vendedor", "nivel"]}
-    }
-    selo_schema_resp = await admin_request(session, "POST", f"{ISSUER_ADMIN}/anoncreds/schema", schema_selo_body)
-    if not selo_schema_resp: return "Erro ao criar schema do selo."
-    STATE["selo_schema_id"] = selo_schema_resp.get("schema_state", {}).get("schema_id")
-    logging.info(f"Selo Schema ID: {STATE['selo_schema_id']}")
-
-    # 3. Criar CredDef do Selo
-    cred_def_selo_body = {
-        "credential_definition": {"issuerId": issuer_did, "schemaId": STATE["selo_schema_id"], "tag": "selo"}
-    }
-    selo_cred_def_resp = await admin_request(session, "POST", f"{ISSUER_ADMIN}/anoncreds/credential-definition", cred_def_selo_body)
-    if not selo_cred_def_resp: return "Erro ao criar cred def do selo."
-    STATE["selo_cred_def_id"] = selo_cred_def_resp.get("credential_definition_state", {}).get("credential_definition_id")
-    logging.info(f"Selo CredDef ID: {STATE['selo_cred_def_id']}")
-
-    # 4. Criar Schema do Produto
-    schema_prod_body = {
-        "schema": {"issuerId": issuer_did, "name": "anuncio-produto", "version": "1.0", "attrNames": ["produto", "preco", "id_anuncio"]}
-    }
-    prod_schema_resp = await admin_request(session, "POST", f"{ISSUER_ADMIN}/anoncreds/schema", schema_prod_body)
-    if not prod_schema_resp: return "Erro ao criar schema do produto."
-    STATE["produto_schema_id"] = prod_schema_resp.get("schema_state", {}).get("schema_id")
-    logging.info(f"Produto Schema ID: {STATE['produto_schema_id']}")
-
-    # 5. Criar CredDef do Produto
-    cred_def_prod_body = {
-        "credential_definition": {"issuerId": issuer_did, "schemaId": STATE["produto_schema_id"], "tag": "produto"}
-    }
-    prod_cred_def_resp = await admin_request(session, "POST", f"{ISSUER_ADMIN}/anoncreds/credential-definition", cred_def_prod_body)
-    if not prod_cred_def_resp: return "Erro ao criar cred def do produto."
-    STATE["produto_cred_def_id"] = prod_cred_def_resp.get("credential_definition_state", {}).get("credential_definition_id")
-    logging.info(f"Produto CredDef ID: {STATE['produto_cred_def_id']}")
+    did_data = await admin_request(session, "GET", f"{OPERADORA_ADMIN}/wallet/did/public")
+    if not did_data: 
+        return "Erro crítico: Não foi possível obter o DID público da Operadora. Verifique se o agente está rodando e conectado ao ledger."
     
-    return "Marketplace configurado com sucesso! Schemas e CredDefs criados."
+    op_did = did_data["result"]["did"]
+    STATE["operadora_did"] = op_did
 
-async def conectar_admin_vendedor(session: aiohttp.ClientSession) -> str:
-    """Ferramenta 2: Conecta o Admin (Issuer) ao Vendedor (Holder)."""
-    logging.info("Conectando Admin ao Vendedor...")
+    # 2. Schema e CredDef: Identidade (KYC)
+    s_kyc = {"schema": {"issuerId": op_did, "name": "identidade-assinante", "version": "1.2", "attrNames": ["nome_completo", "cpf", "status_conta"]}}
+    resp_s_kyc = await admin_request(session, "POST", f"{OPERADORA_ADMIN}/anoncreds/schema", s_kyc)
     
-    # 1. Issuer cria convite
-    invite_body = {"handshake_protocols": ["https://didcomm.org/didexchange/1.0"]}
-    invite_resp = await admin_request(session, "POST", f"{ISSUER_ADMIN}/out-of-band/create-invitation", invite_body)
-    if not invite_resp: return "Erro ao criar convite."
-    invitation = invite_resp["invitation"]
+    if not resp_s_kyc: return "Erro ao criar Schema de Identidade (verifique os logs do terminal do chatbot)."
+    STATE["kyc_schema_id"] = resp_s_kyc["schema_state"]["schema_id"]
 
-    # 2. Holder recebe convite
-    conn_resp = await admin_request(session, "POST", f"{HOLDER_ADMIN}/out-of-band/receive-invitation", invitation)
-    if not conn_resp: return "Erro ao receber convite."
+    cd_kyc = {"credential_definition": {"issuerId": op_did, "schemaId": STATE["kyc_schema_id"], "tag": "kyc"}}
+    resp_cd_kyc = await admin_request(session, "POST", f"{OPERADORA_ADMIN}/anoncreds/credential-definition", cd_kyc)
     
-    # 3. Armazena o Conn ID (do lado do Issuer)
-    # Em um app real, esperaríamos o 'state' ficar 'active' via webhook
-    # Aqui, vamos apenas buscar o ID
-    conn_list = await admin_request(session, "GET", f"{ISSUER_ADMIN}/connections", params={"their_label": "Holder"})
-    if not conn_list or not conn_list.get("results"):
-        return "Conexão iniciada, mas não foi possível encontrar o ID no Issuer."
-    
-    STATE["conn_id_issuer_holder"] = conn_list["results"][0]["connection_id"]
-    logging.info(f"Conn ID (Issuer-Holder): {STATE['conn_id_issuer_holder']}")
-    
-    return "Conexão entre Admin e Vendedor estabelecida."
+    if not resp_cd_kyc: return "Erro ao criar CredDef de Identidade."
+    STATE["kyc_cred_def_id"] = resp_cd_kyc["credential_definition_state"]["credential_definition_id"]
 
-async def emitir_selo_vendedor(session: aiohttp.ClientSession, nome_vendedor: str, nivel: str) -> str:
-    """Ferramenta 3: Emite um Selo de Vendedor para o Holder."""
-    logging.info(f"Emitindo selo para {nome_vendedor}...")
+    # 3. Schema e CredDef: Plano (Promoção)
+    s_plano = {"schema": {"issuerId": op_did, "name": "plano-dados", "version": "1.2", "attrNames": ["nome_plano", "franquia_gb", "validade"]}}
+    resp_s_plano = await admin_request(session, "POST", f"{OPERADORA_ADMIN}/anoncreds/schema", s_plano)
     
-    conn_id = STATE.get("conn_id_issuer_holder")
-    cred_def_id = STATE.get("selo_cred_def_id")
-    
-    if not conn_id or not cred_def_id:
-        return "Erro: Conecte o Admin ao Vendedor e configure o marketplace primeiro."
+    if not resp_s_plano: return "Erro ao criar Schema de Plano."
+    STATE["plano_schema_id"] = resp_s_plano["schema_state"]["schema_id"]
 
-    issue_body = {
+    cd_plano = {"credential_definition": {"issuerId": op_did, "schemaId": STATE["plano_schema_id"], "tag": "promo"}}
+    resp_cd_plano = await admin_request(session, "POST", f"{OPERADORA_ADMIN}/anoncreds/credential-definition", cd_plano)
+    
+    if not resp_cd_plano: return "Erro ao criar CredDef de Plano."
+    STATE["plano_cred_def_id"] = resp_cd_plano["credential_definition_state"]["credential_definition_id"]
+
+    return f"Infraestrutura TelecomX configurada com sucesso. DID: {op_did}"
+
+async def conectar_cliente(session: aiohttp.ClientSession) -> str:
+    logging.info("Conectando cliente à Operadora...")
+
+    # 1. Convite da Operadora
+    body = {"handshake_protocols": ["https://didcomm.org/didexchange/1.0"]}
+    inv_resp = await admin_request(session, "POST", f"{OPERADORA_ADMIN}/out-of-band/create-invitation", body)
+    if not inv_resp: return "Erro ao criar convite na Operadora."
+
+    # 2. Cliente Aceita
+    acc_resp = await admin_request(session, "POST", f"{CLIENTE_ADMIN}/out-of-band/receive-invitation", inv_resp["invitation"])
+    if not acc_resp: return "Erro ao receber convite no Cliente."
+
+    # 3. Resgatar ID da Conexão
+    await asyncio.sleep(2)
+    conns = await admin_request(session, "GET", f"{OPERADORA_ADMIN}/connections", params={"their_label": "Holder"})
+    
+    if conns and conns.get("results"):
+        # Pega a conexão mais recente (última da lista ou ordena se necessário)
+        STATE["conn_id_operadora"] = conns["results"][0]["connection_id"]
+        return "Cliente conectado e autenticado na base da TelecomX."
+    
+    return "Conexão iniciada, mas ID não encontrado na Operadora."
+
+async def ativar_plano(session: aiohttp.ClientSession, nome_plano: str, franquia: str) -> str:
+    conn_id = STATE.get("conn_id_operadora")
+    cred_def_id = STATE.get("plano_cred_def_id")
+
+    if not conn_id or not cred_def_id: return "Erro: Necessário setup e conexão prévia."
+
+    body = {
         "connection_id": conn_id,
         "filter": {"anoncreds": {"cred_def_id": cred_def_id}},
         "credential_preview": {
             "@type": "issue-credential/2.0/credential-preview",
             "attributes": [
-                {"name": "nome_vendedor", "value": nome_vendedor},
-                {"name": "nivel", "value": nivel}
+                {"name": "nome_plano", "value": nome_plano},
+                {"name": "franquia_gb", "value": franquia},
+                {"name": "validade", "value": "30 dias"}
             ]
         }
     }
-    
-    issue_resp = await admin_request(session, "POST", f"{ISSUER_ADMIN}/issue-credential-2.0/send", issue_body)
-    if not issue_resp: return f"Erro ao emitir selo."
-    
-    return f"Selo de Vendedor '{nivel}' emitido para '{nome_vendedor}'."
 
-# Você pode adicionar mais funções aqui, como `emitir_anuncio_produto`, etc.
+    resp = await admin_request(session, "POST", f"{OPERADORA_ADMIN}/issue-credential-2.0/send", body)
+    if resp:
+        return f"Plano '{nome_plano}' ({franquia}) ativado na carteira do cliente."
+    return "Falha na ativação."
+
+async def verificar_acesso(session: aiohttp.ClientSession) -> str:
+    logging.info("Iniciando verificação de rede...")
+    
+    cred_def_id = STATE.get("plano_cred_def_id")
+    if not cred_def_id: return "Erro: Sistema não configurado. Execute o setup primeiro."
+
+    # 1. Conexão Verificador <-> Cliente
+    # Criamos o convite
+    body_inv = {"handshake_protocols": ["https://didcomm.org/didexchange/1.0"]}
+    inv_resp = await admin_request(session, "POST", f"{VERIFICADOR_ADMIN}/out-of-band/create-invitation", body_inv)
+    
+    # O Cliente aceita
+    await admin_request(session, "POST", f"{CLIENTE_ADMIN}/out-of-band/receive-invitation", inv_resp["invitation"])
+    
+    # ESPERA INTELIGENTE PELA CONEXÃO
+    # Tenta por até 15 segundos encontrar a conexão ativa
+    verifier_conn_id = None
+    for _ in range(15):
+        await asyncio.sleep(1)
+        conns = await admin_request(session, "GET", f"{VERIFICADOR_ADMIN}/connections", params={"their_label": "Holder", "state": "active"})
+        if conns and conns.get("results"):
+            # Pega a mais recente
+            verifier_conn_id = conns["results"][-1]["connection_id"] # -1 pega a última da lista
+            break
+    
+    if not verifier_conn_id:
+        return "Erro: Falha ao estabelecer conexão ativa entre Rede e Cliente (Timeout de conexão)."
+
+    # 2. Solicitar Prova
+    req_body = {
+        "connection_id": verifier_conn_id,
+        "presentation_request": {
+            "anoncreds": {
+                "name": "Verificacao de Rede TelecomX",
+                "version": "1.0",
+                "requested_attributes": {
+                    "attr1": {"name": "franquia_gb", "restrictions": [{"cred_def_id": cred_def_id}]},
+                    "attr2": {"name": "nome_plano", "restrictions": [{"cred_def_id": cred_def_id}]}
+                },
+                "requested_predicates": {}
+            }
+        }
+    }
+    
+    proof_resp = await admin_request(session, "POST", f"{VERIFICADOR_ADMIN}/present-proof-2.0/send-request", req_body)
+    if not proof_resp: return "Erro ao enviar pedido de prova."
+    
+    pres_ex_id = proof_resp["pres_ex_id"]
+
+    # 3. Aumento de verificação para 90 segundos
+    logging.info("Aguardando prova do cliente (pode demorar devido à carga da CPU)...")
+    for i in range(90):
+        await asyncio.sleep(1)
+        record = await admin_request(session, "GET", f"{VERIFICADOR_ADMIN}/present-proof-2.0/records/{pres_ex_id}")
+        
+        if not record: continue
+        
+        state = record["state"]
+        logging.info(f"Status da prova ({i}s): {state}") # Log para você acompanhar
+
+        if state == "done" or state == "verified":
+            if str(record["verified"]).lower() == "true":
+                try:
+                    dados = record["by_format"]["pres"]["anoncreds"]["presentation"]["requested_proof"]["revealed_attrs"]
+                    return f"Acesso Liberado! Plano: {dados['attr2']['raw']} | Franquia: {dados['attr1']['raw']}"
+                except KeyError:
+                    return "Verificado, mas erro ao ler dados."
+            else:
+                return "Acesso Negado! Credencial inválida."
+        
+        if state == "abandoned":
+             return "O Cliente rejeitou o pedido de prova."
+                
+    return "Timeout: O Cliente demorou muito para responder (Tente novamente)."
