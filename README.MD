@@ -1,7 +1,3 @@
-Aqui está o **README.md** atualizado, refletindo a nova arquitetura simplificada (onde a Operadora atua também como Verificadora) e o fluxo focado em comandos via terminal.
-
----
-
 # 📘 TelecomX: Automação de Operadora com IA e SSI (CLI Version)
 
 Este projeto demonstra um caso de uso de **Telecomunicações** utilizando **Identidade Autossoberana (SSI)** e **Inteligência Artificial Generativa**.
