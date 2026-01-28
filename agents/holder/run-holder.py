@@ -10,11 +10,11 @@ aca-py start \
  --log-level debug \
  --endpoint http://localhost:8010 \
  --label Holder \
- --seed 000000000000000000000000Steward1 \
+ --seed 70000000000000000000000000000000 \
  --genesis-url http://localhost:9000/genesis \
  --ledger-pool-name localindypool \
  --wallet-key 123456 \
- --wallet-name holder_wallet_clean \
+ --wallet-name holder_wallet_v7 \
  --wallet-type askar-anoncreds \
  --admin 0.0.0.0 8011 \
  --admin-insecure-mode \

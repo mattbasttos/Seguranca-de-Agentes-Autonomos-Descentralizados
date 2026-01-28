@@ -1,0 +1,11 @@
+# 1. Setup
+curl -X POST http://localhost:8080/chat -H "Content-Type: application/json" -d '{"message": "Inicie os sistemas da TelecomX"}'
+
+# 2. Conexão
+curl -X POST http://localhost:8080/chat -H "Content-Type: application/json" -d '{"message": "Faça a conexão com o novo cliente"}'
+
+# 3. Emitir (Ativar Plano)
+curl -X POST http://localhost:8080/chat -H "Content-Type: application/json" -d '{"message": "Ative o plano TelecomX Ultra com 500GB para este cliente"}'
+
+# 4. Verificar (Agora feito pela Operadora)
+curl -X POST http://localhost:8080/chat -H "Content-Type: application/json" -d '{"message": "Verifique se este cliente tem permissão para acessar a rede"}'

@@ -8,7 +8,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # --- Constantes ---
 OPERADORA_ADMIN = "http://localhost:8001"
 CLIENTE_ADMIN = "http://localhost:8011"
-VERIFICADOR_ADMIN = "http://localhost:8021"
+# VERIFICADOR_ADMIN foi removido. A Operadora fará tudo.
 
 # --- Estado em Memória ---
 STATE = {
@@ -17,8 +17,8 @@ STATE = {
     "kyc_cred_def_id": None,
     "plano_schema_id": None,
     "plano_cred_def_id": None,
-    "conn_id_operadora": None,
-    "conn_id_verificador": None
+    "conn_id_operadora": None 
+    # conn_id_verificador removido
 }
 
 # --- Auxiliar HTTP ---
@@ -43,16 +43,16 @@ async def setup_telco(session: aiohttp.ClientSession) -> str:
     # 1. Obter DID
     did_data = await admin_request(session, "GET", f"{OPERADORA_ADMIN}/wallet/did/public")
     if not did_data: 
-        return "Erro crítico: Não foi possível obter o DID público da Operadora. Verifique se o agente está rodando e conectado ao ledger."
+        return "Erro crítico: Não foi possível obter o DID público da Operadora. Verifique se o agente está rodando."
     
     op_did = did_data["result"]["did"]
     STATE["operadora_did"] = op_did
 
     # 2. Schema e CredDef: Identidade (KYC)
-    s_kyc = {"schema": {"issuerId": op_did, "name": "identidade-assinante", "version": "1.2", "attrNames": ["nome_completo", "cpf", "status_conta"]}}
+    s_kyc = {"schema": {"issuerId": op_did, "name": "identidade-assinante", "version": "1.0", "attrNames": ["nome_completo", "cpf", "status_conta"]}}
     resp_s_kyc = await admin_request(session, "POST", f"{OPERADORA_ADMIN}/anoncreds/schema", s_kyc)
     
-    if not resp_s_kyc: return "Erro ao criar Schema de Identidade (verifique os logs do terminal do chatbot)."
+    if not resp_s_kyc: return "Erro ao criar Schema de Identidade."
     STATE["kyc_schema_id"] = resp_s_kyc["schema_state"]["schema_id"]
 
     cd_kyc = {"credential_definition": {"issuerId": op_did, "schemaId": STATE["kyc_schema_id"], "tag": "kyc"}}
@@ -62,7 +62,7 @@ async def setup_telco(session: aiohttp.ClientSession) -> str:
     STATE["kyc_cred_def_id"] = resp_cd_kyc["credential_definition_state"]["credential_definition_id"]
 
     # 3. Schema e CredDef: Plano (Promoção)
-    s_plano = {"schema": {"issuerId": op_did, "name": "plano-dados", "version": "1.2", "attrNames": ["nome_plano", "franquia_gb", "validade"]}}
+    s_plano = {"schema": {"issuerId": op_did, "name": "plano-dados", "version": "1.0", "attrNames": ["nome_plano", "franquia_gb", "validade"]}}
     resp_s_plano = await admin_request(session, "POST", f"{OPERADORA_ADMIN}/anoncreds/schema", s_plano)
     
     if not resp_s_plano: return "Erro ao criar Schema de Plano."
@@ -93,8 +93,9 @@ async def conectar_cliente(session: aiohttp.ClientSession) -> str:
     conns = await admin_request(session, "GET", f"{OPERADORA_ADMIN}/connections", params={"their_label": "Holder"})
     
     if conns and conns.get("results"):
-        # Pega a conexão mais recente (última da lista ou ordena se necessário)
-        STATE["conn_id_operadora"] = conns["results"][0]["connection_id"]
+        # Ordena para pegar a conexão ativa mais recente
+        sorted_conns = sorted(conns["results"], key=lambda x: x["created_at"], reverse=True)
+        STATE["conn_id_operadora"] = sorted_conns[0]["connection_id"]
         return "Cliente conectado e autenticado na base da TelecomX."
     
     return "Conexão iniciada, mas ID não encontrado na Operadora."
@@ -124,36 +125,17 @@ async def ativar_plano(session: aiohttp.ClientSession, nome_plano: str, franquia
     return "Falha na ativação."
 
 async def verificar_acesso(session: aiohttp.ClientSession) -> str:
-    logging.info("Iniciando verificação de rede...")
+    logging.info("Iniciando verificação de rede (via Operadora)...")
     
+    conn_id = STATE.get("conn_id_operadora")
     cred_def_id = STATE.get("plano_cred_def_id")
-    if not cred_def_id: return "Erro: Sistema não configurado. Execute o setup primeiro."
 
-    # 1. Conexão Verificador <-> Cliente
-    # Criamos o convite
-    body_inv = {"handshake_protocols": ["https://didcomm.org/didexchange/1.0"]}
-    inv_resp = await admin_request(session, "POST", f"{VERIFICADOR_ADMIN}/out-of-band/create-invitation", body_inv)
-    
-    # O Cliente aceita
-    await admin_request(session, "POST", f"{CLIENTE_ADMIN}/out-of-band/receive-invitation", inv_resp["invitation"])
-    
-    # ESPERA INTELIGENTE PELA CONEXÃO
-    # Tenta por até 15 segundos encontrar a conexão ativa
-    verifier_conn_id = None
-    for _ in range(15):
-        await asyncio.sleep(1)
-        conns = await admin_request(session, "GET", f"{VERIFICADOR_ADMIN}/connections", params={"their_label": "Holder", "state": "active"})
-        if conns and conns.get("results"):
-            # Pega a mais recente
-            verifier_conn_id = conns["results"][-1]["connection_id"] # -1 pega a última da lista
-            break
-    
-    if not verifier_conn_id:
-        return "Erro: Falha ao estabelecer conexão ativa entre Rede e Cliente (Timeout de conexão)."
+    if not conn_id: return "Erro: Cliente não está conectado à Operadora."
+    if not cred_def_id: return "Erro: Sistema não configurado."
 
-    # 2. Solicitar Prova
+    # 1. Solicitar Prova
     req_body = {
-        "connection_id": verifier_conn_id,
+        "connection_id": conn_id,
         "presentation_request": {
             "anoncreds": {
                 "name": "Verificacao de Rede TelecomX",
@@ -167,33 +149,55 @@ async def verificar_acesso(session: aiohttp.ClientSession) -> str:
         }
     }
     
-    proof_resp = await admin_request(session, "POST", f"{VERIFICADOR_ADMIN}/present-proof-2.0/send-request", req_body)
+    proof_resp = await admin_request(session, "POST", f"{OPERADORA_ADMIN}/present-proof-2.0/send-request", req_body)
     if not proof_resp: return "Erro ao enviar pedido de prova."
     
     pres_ex_id = proof_resp["pres_ex_id"]
 
-    # 3. Aumento de verificação para 90 segundos
-    logging.info("Aguardando prova do cliente (pode demorar devido à carga da CPU)...")
+    # 2. Monitoramento e Validação
+    logging.info("Aguardando prova do cliente...")
     for i in range(90):
         await asyncio.sleep(1)
-        record = await admin_request(session, "GET", f"{VERIFICADOR_ADMIN}/present-proof-2.0/records/{pres_ex_id}")
         
-        if not record: continue
+        record = await admin_request(session, "GET", f"{OPERADORA_ADMIN}/present-proof-2.0/records/{pres_ex_id}")
+        if not record or "error" in record: continue
         
         state = record["state"]
-        logging.info(f"Status da prova ({i}s): {state}") # Log para você acompanhar
+        logging.info(f"Status da prova ({i}s): {state}")
 
-        if state == "done" or state == "verified":
-            if str(record["verified"]).lower() == "true":
-                try:
-                    dados = record["by_format"]["pres"]["anoncreds"]["presentation"]["requested_proof"]["revealed_attrs"]
-                    return f"Acesso Liberado! Plano: {dados['attr2']['raw']} | Franquia: {dados['attr1']['raw']}"
-                except KeyError:
-                    return "Verificado, mas erro ao ler dados."
-            else:
-                return "Acesso Negado! Credencial inválida."
-        
-        if state == "abandoned":
-             return "O Cliente rejeitou o pedido de prova."
+        if state == "presentation-received":
+            logging.info("Prova recebida. Executando validação criptográfica...")
+            
+            # Executa a verificação e captura a resposta imediatamente
+            verified_record = await admin_request(session, "POST", f"{OPERADORA_ADMIN}/present-proof-2.0/records/{pres_ex_id}/verify-presentation")
+            
+            if verified_record:
+                is_verified = str(verified_record.get("verified")).lower()
                 
-    return "Timeout: O Cliente demorou muito para responder (Tente novamente)."
+                if is_verified == "true":
+                    try:
+                        # Tenta localizar os dados na estrutura 'indy' ou 'anoncreds'
+                        pres_data = verified_record["by_format"]["pres"]
+                        target = pres_data.get("indy") or pres_data.get("anoncreds")
+                        
+                        if target:
+                            dados = target["presentation"]["requested_proof"]["revealed_attrs"]
+                            plano = dados['attr2']['raw']
+                            franquia = dados['attr1']['raw']
+                            return f"Acesso Liberado. Plano: {plano} | Franquia: {franquia}"
+                        else:
+                            logging.warning(f"Estrutura JSON desconhecida: {pres_data.keys()}")
+                            return "Verificado com sucesso, mas o formato dos dados não foi reconhecido."
+
+                    except KeyError as e:
+                        logging.error(f"Erro ao extrair atributos da prova: {e}")
+                        return "Verificado com sucesso (dados ocultos ou erro de leitura)."
+                else:
+                    return "Acesso Negado. A assinatura digital apresentada é inválida."
+            else:
+                return "Erro interno ao processar a verificação."
+
+        if state == "abandoned":
+             return "Operação cancelada: O cliente rejeitou o pedido de prova."
+                
+    return "Timeout: O processo excedeu o tempo limite de resposta."

@@ -1,0 +1,152 @@
+Aqui está o **README.md** atualizado, refletindo a nova arquitetura simplificada (onde a Operadora atua também como Verificadora) e o fluxo focado em comandos via terminal.
+
+---
+
+# 📘 TelecomX: Automação de Operadora com IA e SSI (CLI Version)
+
+Este projeto demonstra um caso de uso de **Telecomunicações** utilizando **Identidade Autossoberana (SSI)** e **Inteligência Artificial Generativa**.
+
+O sistema simula uma operadora ("TelecomX") onde um Agente de IA (**Ollama/Phi-3**) interpreta comandos em linguagem natural para orquestrar a emissão e verificação de credenciais verificáveis no blockchain (**Hyperledger Aries**).
+
+> **Mudança de Arquitetura:** Nesta versão, a complexidade foi reduzida. O Agente da Operadora (Issuer) atua também como Verificador, validando as credenciais que ela mesma emitiu, simplificando a infraestrutura de rede.
+
+---
+
+## 🛠️ Pré-requisitos
+
+* **Sistema Operacional:** Linux (Ubuntu 20.04+ ou WSL2).
+* **Docker:** Para rodar a VON Network (Ledger).
+* **Python 3.12+:** Para os scripts dos agentes e controlador.
+* **Ollama:** Rodando localmente com o modelo `phi3:mini`.
+
+---
+
+## 🚀 Guia de Execução (Passo a Passo)
+
+Siga a ordem exata dos terminais abaixo para subir a infraestrutura.
+
+### 1. Limpeza do Ambiente (Obrigatório)
+
+Antes de iniciar, limpe os dados de execuções anteriores para evitar conflitos de carteira e IDs duplicados no Ledger.
+
+```bash
+# Pare todos os processos anteriores e rode:
+rm -rf ~/.indy_client/wallet/issuer_wallet_prod
+rm -rf ~/.indy_client/wallet/holder_wallet_clean
+# Nota: Não existe mais wallet de verifier separado.
+
+```
+
+### 2. Terminal 1: Blockchain (VON Network)
+
+Inicie o ledger local do Hyperledger Indy.
+
+```bash
+cd von-network
+./manage start
+# Aguarde até ver os logs do webserver na porta 9000.
+
+```
+
+### 3. Terminal 2: Operadora TelecomX (Issuer & Verifier)
+
+Este agente representa a empresa. Ele emite credenciais e verifica o acesso.
+
+```bash
+source venv/bin/activate
+python issuer/run_issuer.py
+# Deve iniciar na porta 8000/8001.
+
+```
+
+### 4. Terminal 3: Cliente (Holder)
+
+Este agente representa o usuário final e sua carteira digital.
+
+```bash
+source venv/bin/activate
+python holder/run_holder.py
+# Deve iniciar na porta 8010/8011.
+
+```
+
+### 5. Terminal 4: Cérebro do Sistema (Controller & IA)
+
+A API que recebe os comandos, consulta o Ollama e comanda a Operadora.
+
+```bash
+cd controller
+source ../venv/bin/activate
+python chatbot_server.py
+# Aguarde a mensagem: Uvicorn running on http://0.0.0.0:8080
+
+```
+
+---
+
+## 💻 Roteiro de Demonstração (Comandos CURL)
+
+Abra um **Terminal 5** para atuar como o usuário enviando mensagens. Copie e cole os comandos abaixo na ordem.
+
+### Passo 1: Configuração (Setup)
+
+Inicializa os Schemas (Identidade e Planos) e as Definições de Credencial (CredDefs) no Blockchain.
+
+```bash
+curl -X POST http://localhost:8080/chat \
+     -H "Content-Type: application/json" \
+     -d '{"message": "Inicie os sistemas da TelecomX"}'
+
+```
+
+> **Resposta Esperada:** `"Infraestrutura TelecomX configurada com sucesso. DID: [Th7M...]"`
+
+### Passo 2: Conexão (Onboarding)
+
+Estabelece o canal seguro (DIDComm) entre a Operadora e o Cliente.
+
+```bash
+curl -X POST http://localhost:8080/chat \
+     -H "Content-Type: application/json" \
+     -d '{"message": "Faça a conexão com o novo cliente"}'
+
+```
+
+> **Resposta Esperada:** `"Cliente conectado e autenticado na base da TelecomX."`
+
+### Passo 3: Contratação (Emissão)
+
+A IA interpreta o pedido, extrai "TelecomX Ultra" e "500GB", e a Operadora emite a credencial.
+
+```bash
+curl -X POST http://localhost:8080/chat \
+     -H "Content-Type: application/json" \
+     -d '{"message": "Ative o plano TelecomX Ultra com 500GB para este cliente"}'
+
+```
+
+> **Resposta Esperada:** `"Plano 'TelecomX Ultra' (500GB) ativado na carteira do cliente."`
+
+### Passo 4: Acesso à Rede (Verificação)
+
+A Operadora desafia o cliente a provar que possui um plano ativo (Zero-Knowledge Proof). O sistema força a validação da prova recebida.
+
+```bash
+curl -X POST http://localhost:8080/chat \
+     -H "Content-Type: application/json" \
+     -d '{"message": "Verifique se este cliente tem permissão para acessar a rede"}'
+
+```
+
+> **Resposta Esperada:** `"Acesso Liberado. Plano: TelecomX Ultra | Franquia: 500GB"`
+> *(Nota: Caso a leitura dos atributos falhe, pode retornar "Verificado com sucesso (dados ocultos)", o que também confirma a validade da assinatura).*
+
+---
+
+## ✅ Verificação Técnica (Swagger)
+
+Para comprovar que as credenciais existem de verdade:
+
+1. Acesse **http://localhost:8011/api/doc** (Swagger do Cliente/Holder).
+2. Vá em **credentials** > `GET /credentials`.
+3. Execute e verifique o JSON contendo os dados do plano assinados digitalmente.
