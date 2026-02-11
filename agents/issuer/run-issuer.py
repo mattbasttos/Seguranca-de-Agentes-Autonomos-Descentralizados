@@ -11,14 +11,15 @@ aca-py start \
  --log-level debug \
  --endpoint http://localhost:8000 \
  --label Issuer \
- --seed 70000000000000000000000000000000 \
+ --seed 02000000000000000000000000000000 \
  --genesis-url http://localhost:9000/genesis \
  --ledger-pool-name localindypool \
  --wallet-key 123456 \
- --wallet-name issuer_wallet_v7 \
+ --wallet-name issuer_wallet_v20 \
  --wallet-type askar-anoncreds \
  --admin 0.0.0.0 8001 \
  --admin-insecure-mode \
+  --webhook-url http://localhost:5001/webhooks \
  --public-invites \
  --auto-accept-invites \
  --auto-accept-requests \
