@@ -1,56 +1,50 @@
 import requests
 import json
-import logging
+import re
 
-# Configuração do Ollama
 OLLAMA_URL = "http://localhost:11434/api/generate"
-MODEL_NAME = "phi3:mini"  # Certifique-se que este modelo está baixado no Ollama
+MODEL_NAME = "phi3:mini" # Pode mudar para llama3 se quiser
 
 def ask_ollama(system_persona: str, user_message: str):
-    """Gera uma resposta de conversação (Chat)."""
-    prompt = f"{system_persona}\nUser: {user_message}\nResposta (Curta e útil):"
-    
-    payload = {
-        "model": MODEL_NAME,
-        "prompt": prompt,
-        "stream": False,
-        "options": {"temperature": 0.3}
-    }
+    """Chatbot normal para conversar"""
+    prompt = f"{system_persona}\nUsuário: {user_message}\nResposta:"
+    payload = {"model": MODEL_NAME, "prompt": prompt, "stream": False, "options": {"temperature": 0.4}}
     try:
         resp = requests.post(OLLAMA_URL, json=payload, timeout=20)
         return {"content": resp.json()['response']}
     except Exception as e:
         return {"content": f"(Erro IA: {e})"}
 
-def extract_credential_data(user_message: str):
+def extract_intent(user_message: str):
     """
-    Função Especializada: Tenta encontrar Nome e Plano na frase.
-    Retorna JSON puro: {"nome": "...", "plano": "..."}
+    IA MESTRA DA OPERADORA: Lê a frase e decide qual credencial emitir.
+    Espera um JSON: {"tipo": "identidade|plano|clube", "dados": { ... }}
     """
-    system_instruction = (
-        "Voce e um extrator de dados para uma empresa de telecom. "
-        "Analise a frase. Se houver um NOME DE PESSOA e um TIPO DE PLANO (internet, fibra, etc), extraia-os. "
-        "Retorne APENAS um JSON valido no formato: {\"nome\": \"...\", \"plano\": \"...\"}. "
-        "Se nao encontrar, retorne um JSON vazio {}."
-        "Nao escreva nada alem do JSON."
-    )
+    system_instruction = """
+    Você é um sistema de extração de dados JSON.
+    Temos 3 tipos de credenciais disponíveis:
+    1. "identidade": Exige "nome" e "cpf".
+    2. "plano": Exige "nome_plano" e "franquia".
+    3. "clube": Exige "categoria" (ex: Ouro, VIP) e "pontos".
+    
+    Analise a frase. Se o usuário estiver pedindo uma dessas credenciais e informando os dados, extraia-os.
+    Retorne APENAS UM JSON VÁLIDO.
+    Exemplo: {"tipo": "plano", "dados": {"nome_plano": "Fibra", "franquia": "500GB"}}
+    Se faltar informação ou não for um pedido, retorne: {}
+    NÃO ESCREVA NENHUM TEXTO ALÉM DO JSON.
+    """
     
     prompt = f"{system_instruction}\nFrase: \"{user_message}\"\nJSON:"
-    
-    payload = {
-        "model": MODEL_NAME,
-        "prompt": prompt,
-        "stream": False,
-        "format": "json", # Força resposta JSON
-        "options": {"temperature": 0.1} # Criatividade baixa para ser preciso
-    }
+    payload = {"model": MODEL_NAME, "prompt": prompt, "stream": False, "format": "json", "options": {"temperature": 0.1}}
     
     try:
         resp = requests.post(OLLAMA_URL, json=payload, timeout=20)
-        response_text = resp.json()['response']
-        # Tenta limpar caso o modelo coloque markdown
-        if "```json" in response_text:
-            response_text = response_text.split("```json")[1].split("```")[0]
-        return json.loads(response_text)
-    except Exception as e:
+        texto = resp.json()['response']
+        
+        # Limpa markdown caso a IA teime em colocar
+        if "```json" in texto:
+            texto = texto.split("```json")[1].split("```")[0]
+            
+        return json.loads(texto.strip())
+    except:
         return {}
